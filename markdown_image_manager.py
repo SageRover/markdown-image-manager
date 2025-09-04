@@ -40,6 +40,10 @@ class MarkdownImageManager:
         self.invalid_images = {}  # {md_file: [invalid_image_paths]}
         self.image_mapping = {}  # {local_path: remote_url}
         self.mapping_file = "image_mapping.json"
+        self.config_file = "markdown_manager_config.json"
+        
+        # 加载配置
+        self.load_config()
         
         # 加载并迁移图片映射表
         self.load_image_mapping_with_migration()
@@ -53,6 +57,12 @@ class MarkdownImageManager:
         
         self.setup_ui()
         self.load_mapping()
+        
+        # 在UI初始化完成后显示配置加载信息
+        if self.workspace_path:
+            self.log(f"✅ 自动加载上次工作目录: {self.workspace_path}")
+        else:
+            self.log("📁 请选择工作目录开始使用")
     
     def normalize_path(self, path):
         """统一路径分隔符，确保跨平台兼容性"""
@@ -290,9 +300,14 @@ class MarkdownImageManager:
         
         ttk.Label(dir_frame, text="工作目录:").grid(row=0, column=0, sticky=tk.W)
         self.dir_var = tk.StringVar()
+        # 设置上次选择的目录作为默认值
+        if self.workspace_path and os.path.exists(self.workspace_path):
+            self.dir_var.set(self.workspace_path)
         self.dir_entry = ttk.Entry(dir_frame, textvariable=self.dir_var, width=60)
         self.dir_entry.grid(row=0, column=1, padx=(5, 5), sticky=(tk.W, tk.E))
+        self.dir_entry.bind('<Return>', self.on_directory_enter)  # 回车键应用路径
         ttk.Button(dir_frame, text="选择", command=self.select_directory).grid(row=0, column=2)
+        ttk.Button(dir_frame, text="应用", command=self.apply_directory_path).grid(row=0, column=3, padx=(5, 0))
         
         dir_frame.columnconfigure(1, weight=1)
         
@@ -371,13 +386,61 @@ class MarkdownImageManager:
         """清空日志"""
         self.log_text.delete(1.0, tk.END)
     
+    def load_config(self):
+        """加载配置文件"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    self.workspace_path = config.get('last_workspace_path', '')
+                    # 验证目录是否存在
+                    if self.workspace_path and not os.path.exists(self.workspace_path):
+                        self.workspace_path = ""
+        except Exception as e:
+            self.workspace_path = ""
+    
+    def save_config(self):
+        """保存配置文件"""
+        try:
+            config = {
+                'last_workspace_path': self.workspace_path,
+                'last_updated': datetime.datetime.now().isoformat()
+            }
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            self.log(f"保存配置失败: {e}")
+    
     def select_directory(self):
         """选择工作目录"""
-        directory = filedialog.askdirectory()
+        # 如果有上次的目录，设置为初始目录
+        initial_dir = self.workspace_path if self.workspace_path and os.path.exists(self.workspace_path) else None
+        
+        directory = filedialog.askdirectory(initialdir=initial_dir)
         if directory:
             self.workspace_path = directory
             self.dir_var.set(directory)
+            self.save_config()  # 保存配置
             self.log(f"选择工作目录: {directory}")
+    
+    def on_directory_enter(self, event):
+        """回车键应用目录路径"""
+        self.apply_directory_path()
+    
+    def apply_directory_path(self):
+        """应用输入框中的目录路径"""
+        directory = self.dir_var.get().strip()
+        if directory:
+            if os.path.exists(directory) and os.path.isdir(directory):
+                self.workspace_path = directory
+                self.save_config()  # 保存配置
+                self.log(f"应用工作目录: {directory}")
+            else:
+                messagebox.showerror("错误", f"目录不存在: {directory}")
+                # 恢复到之前的有效路径
+                self.dir_var.set(self.workspace_path)
+        else:
+            messagebox.showwarning("警告", "请输入目录路径")
     
     def load_mapping(self):
         """加载图片映射表"""
